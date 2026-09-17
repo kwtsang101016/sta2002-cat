@@ -51,8 +51,25 @@ Open [http://localhost:3001](http://localhost:3001) after `npm start`.
 
 https://kwtsang101016.github.io/sta2002/
 
-## Roster
+## Deploy on Render
 
-- Source: `STA2002 Fall2026/namelist.xlsx` with Child Course ID `STA200226103391`
-- `src/data/roster.json` — public names (no student IDs); `NULL` name parts removed
-- `server/data/credentials.json` — SHA-256 hashes of student IDs (server only)
+1. Repo: [kwtsang101016/sta2002-cat](https://github.com/kwtsang101016/sta2002-cat)
+2. One-click Blueprint (reads `render.yaml`):  
+   https://dashboard.render.com/blueprints/new?repo=https%3A%2F%2Fgithub.com%2Fkwtsang101016%2Fsta2002-cat&branch=main
+3. Service name should be **`sta2002-cat`** so the URL is  
+   https://sta2002-cat.onrender.com/
+4. Set `INSTRUCTOR_PIN` in the Render dashboard (do not use the local default in class)
+5. Optional but recommended for keeping name-card edits after redeploy: create a free [Upstash Redis](https://upstash.com/) database, then set:
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+6. Confirm `/health` returns `"durableStore": true` when Redis is configured
+7. Share the Render URL with the class
+
+Manual Web Service settings (if not using Blueprint): Root Directory `cat`, Build `npm install && npm run build`, Start `npm start`, Health Check `/health`, Node 22.
+
+Redis is written when someone **edits a name card**, and once more on graceful shutdown. Sit / move / stand stay in memory for the live class. Without Upstash, profile edits are lost on redeploy. Wake the free-tier service a few minutes before class.
+
+## Roster files
+
+- `cat/src/data/roster.json` — public names (no student IDs)
+- `cat/server/data/credentials.json` — SHA-256 hashes used only on the server
