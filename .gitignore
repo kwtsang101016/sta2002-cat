@@ -1,0 +1,12 @@
+# OS / editor
+.DS_Store
+*.local
+.vscode/*
+!.vscode/extensions.json
+
+# Dependencies / build (also ignored inside cat/)
+**/node_modules/
+**/dist/
+
+# Runtime seating state (regenerates on server)
+cat/data/state.json
