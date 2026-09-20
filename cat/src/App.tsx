@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import rosterData from "./data/roster.json" with { type: "json" };
 import { AuthModal } from "./components/AuthModal.tsx";
 import { NameCardTray } from "./components/NameCardTray.tsx";
@@ -78,9 +78,11 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const lastTapRef = useRef<{ id: string; at: number } | null>(null);
   const hallRef = useRef<HTMLElement | null>(null);
+  const hallViewportRef = useRef<HTMLDivElement | null>(null);
+  const prevZoomRef = useRef(1);
+  const zoomAnchorRef = useRef<{ contentX: number; contentY: number } | null>(null);
   const [tool, setTool] = useState<"seat" | "zoomIn" | "zoomOut">("seat");
   const [zoom, setZoom] = useState(1);
-  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 40 });
 
   const peopleById = useMemo(() => {
     const map: Record<string, DisplayPerson> = {};
@@ -177,20 +179,15 @@ export default function App() {
   };
 
   const applyZoomAtClientPoint = (clientX: number, clientY: number, direction: "in" | "out") => {
-    const hall = hallRef.current;
-    if (!hall) {
+    const viewport = hallViewportRef.current;
+    if (!viewport) {
       return;
     }
-    const rect = hall.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
-      return;
-    }
-    const x = ((clientX - rect.left) / rect.width) * 100;
-    const y = ((clientY - rect.top) / rect.height) * 100;
-    setZoomOrigin({
-      x: Math.min(100, Math.max(0, x)),
-      y: Math.min(100, Math.max(0, y)),
-    });
+    const vpRect = viewport.getBoundingClientRect();
+    zoomAnchorRef.current = {
+      contentX: viewport.scrollLeft + (clientX - vpRect.left),
+      contentY: viewport.scrollTop + (clientY - vpRect.top),
+    };
     setZoom((current) => {
       if (direction === "in") {
         return Math.min(3.2, Number((current * 1.4).toFixed(2)));
@@ -198,6 +195,24 @@ export default function App() {
       return Math.max(1, Number((current / 1.4).toFixed(2)));
     });
   };
+
+  useLayoutEffect(() => {
+    const viewport = hallViewportRef.current;
+    const anchor = zoomAnchorRef.current;
+    if (!viewport || !anchor) {
+      prevZoomRef.current = zoom;
+      return;
+    }
+    const ratio = zoom / prevZoomRef.current;
+    if (ratio !== 1) {
+      const targetX = anchor.contentX * ratio - viewport.clientWidth / 2;
+      const targetY = anchor.contentY * ratio - viewport.clientHeight / 2;
+      viewport.scrollLeft = Math.max(0, targetX);
+      viewport.scrollTop = Math.max(0, targetY);
+    }
+    prevZoomRef.current = zoom;
+    zoomAnchorRef.current = null;
+  }, [zoom]);
 
   const handleSeatTap = (target: SeatRef, occupantId: string | undefined, event?: { clientX: number; clientY: number }) => {
     if (tool === "zoomIn" || tool === "zoomOut") {
@@ -282,6 +297,10 @@ export default function App() {
         : "";
 
   const seatCount = sync.state.seatsPerRow;
+  const seatGap = 4 * zoom;
+  const seatMin = Math.max(36, 44 * zoom);
+  const seatsGridWidth = seatCount * seatMin + Math.max(0, seatCount - 1) * seatGap;
+  const hallMinWidth = 72 + 8 + seatsGridWidth + 24;
   const seatLabel = (zone: SeatRef["zone"], row: number, seat: number) =>
     zone === "advisor" ? `I-${seat + 1}` : `R${row + 1}-${seat + 1}`;
 
@@ -422,7 +441,7 @@ export default function App() {
             type="button"
             className={tool === "zoomIn" ? "tool-button tool-button--active" : "tool-button"}
             onClick={() => setTool("zoomIn")}
-            title="Magnifier + · enlarge clicked region"
+            title="Magnifier + · spread seats apart at click"
           >
             🔍+
           </button>
@@ -430,7 +449,7 @@ export default function App() {
             type="button"
             className={tool === "zoomOut" ? "tool-button tool-button--active" : "tool-button"}
             onClick={() => setTool("zoomOut")}
-            title="Magnifier − · shrink"
+            title="Magnifier − · tighten seat spacing"
           >
             🔍−
           </button>
@@ -438,8 +457,8 @@ export default function App() {
             type="button"
             className="tool-button"
             onClick={() => {
+              zoomAnchorRef.current = null;
               setZoom(1);
-              setZoomOrigin({ x: 50, y: 40 });
               setTool("seat");
             }}
             title="Reset zoom"
@@ -448,20 +467,25 @@ export default function App() {
           </button>
         </div>
         <p className="zoom-readout">
-          Zoom {zoom.toFixed(2)}×
-          {tool !== "seat" ? " · tap a seat region to zoom" : ""}
+          Spacing {zoom.toFixed(2)}×
+          {tool !== "seat" ? " · tap the hall to spread or tighten seats" : ""}
         </p>
       </section>
 
       <div className="workspace">
-        <div className={`hall-viewport${tool !== "seat" ? " hall-viewport--zoom-tool" : ""}`}>
+        <div
+          ref={hallViewportRef}
+          className={`hall-viewport${tool !== "seat" ? " hall-viewport--zoom-tool" : ""}`}
+        >
           <main
             ref={hallRef}
             className="hall"
             style={{
               ["--seats-per-row" as string]: seatCount,
-              transform: `scale(${zoom})`,
-              transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%`,
+              ["--zoom" as string]: zoom,
+              ["--seat-gap" as string]: `${seatGap}px`,
+              ["--seat-min" as string]: `${seatMin}px`,
+              minWidth: `${hallMinWidth}px`,
             }}
           >
           <div className="blackboard">Front · 讲台</div>
