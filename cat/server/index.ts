@@ -207,9 +207,11 @@ async function main(): Promise<void> {
     maxHttpBufferSize: 3e5,
   });
 
-  /** In-memory only: cold start / redeploy always begins closed. */
-  let sessionOpen = false;
-  /** Long enough for a full lecture if the instructor tab briefly disconnects. */
+  /**
+   * Session stays open by default. Render suspend/resume replaces the old
+   * open/close workflow, so we no longer auto-close or kick clients.
+   */
+  let sessionOpen = true;
   const IDLE_CLOSE_MS = 3 * 60 * 60 * 1000;
   let idleCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -268,47 +270,27 @@ async function main(): Promise<void> {
   };
 
   const closeSession = (reason: "closed" | "idle"): void => {
+    // Kept for optional instructor use; does not disconnect clients anymore.
     clearIdleCloseTimer();
     sessionOpen = false;
     livePoll = null;
     pollVotes.clear();
     emitSessionStatus(reason);
-    for (const socket of io.sockets.sockets.values()) {
-      socket.emit("session-closed", { reason });
-      socket.disconnect(true);
-    }
   };
 
   const scheduleIdleClose = (): void => {
+    // No-op: idle auto-close disabled (Render suspend covers free-tier hours).
     clearIdleCloseTimer();
-    if (!sessionOpen) {
-      return;
-    }
-    idleCloseTimer = setTimeout(() => {
-      if (sessionOpen && countInstructors() === 0) {
-        console.log("Closing classroom session after idle timeout (no instructor).");
-        closeSession("idle");
-      }
-    }, IDLE_CLOSE_MS);
+    void IDLE_CLOSE_MS;
   };
 
   const refreshInstructorPresence = (): void => {
-    if (!sessionOpen) {
-      clearIdleCloseTimer();
-      return;
-    }
-    if (countInstructors() > 0) {
-      clearIdleCloseTimer();
-    } else {
-      scheduleIdleClose();
-    }
+    clearIdleCloseTimer();
+    void countInstructors;
   };
 
-  const requireOpenSession = (socket: Socket): void => {
-    if (sessionOpen || getAuth(socket).isInstructor) {
-      return;
-    }
-    throw new Error("Classroom session is closed. Wait for the instructor to open it.");
+  const requireOpenSession = (_socket: Socket): void => {
+    // Session gating disabled — classroom is usable whenever the service is awake.
   };
 
   io.on("connection", (socket) => {
@@ -319,16 +301,6 @@ async function main(): Promise<void> {
     socket.emit("poll-state", buildPollPublic());
     socket.broadcast.emit("presence", { connectedCount: io.engine.clientsCount });
 
-    if (!sessionOpen) {
-      // Students who never authorize as instructor are kicked; instructors keep the socket to open class.
-      const grace = setTimeout(() => {
-        if (!sessionOpen && !getAuth(socket).isInstructor && socket.connected) {
-          socket.emit("session-closed", { reason: "closed" });
-          socket.disconnect(true);
-        }
-      }, 90_000);
-      socket.once("disconnect", () => clearTimeout(grace));
-    }
 
     socket.on("authorize", (payload: unknown, ack?: (response: { ok: boolean; message?: string }) => void) => {
       try {
@@ -357,9 +329,6 @@ async function main(): Promise<void> {
           return;
         }
 
-        if (!sessionOpen) {
-          throw new Error("Classroom session is closed. Wait for the instructor to open it.");
-        }
 
         if (typeof personId !== "string" || !personIds.has(personId)) {
           throw new Error("Unknown name card.");
@@ -409,9 +378,6 @@ async function main(): Promise<void> {
     socket.on("pollStart", (payload: unknown) => {
       try {
         requireInstructor(socket);
-        if (!sessionOpen) {
-          throw new Error("Open the classroom session before starting a poll.");
-        }
         if (typeof payload !== "object" || payload === null) {
           throw new Error("Invalid poll payload.");
         }
@@ -475,9 +441,6 @@ async function main(): Promise<void> {
 
     socket.on("pollVote", (payload: unknown) => {
       try {
-        if (!sessionOpen) {
-          throw new Error("Classroom session is closed.");
-        }
         if (!livePoll || livePoll.status !== "open") {
           throw new Error("Voting is closed for this poll.");
         }

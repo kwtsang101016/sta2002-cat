@@ -23,22 +23,15 @@ With that PIN you can manage any card, change row / seat counts, reset seats, an
 
 Local default PIN if unset: `change-me-sta2002` — change it before class.
 
-### Open / Close session (Render free hours)
+### Always-on session (Render suspend/resume)
 
-The classroom starts **closed** after every cold start. Students cannot use seating until you open a session.
+The classroom stays **open** whenever the service is awake. Clients auto-connect; no Join / Open / Close session steps. Use **Instructor PIN** only when you need instructor controls.
 
-1. Tap **Join classroom**
-2. Tap **Instructor PIN** (or wait if the PIN was saved in this browser) and enter `INSTRUCTOR_PIN`
-3. Tap **Open session** — students can then Join and sit
-4. After class, tap **Close session** (disconnects everyone)
-
-If no instructor stays connected for **3 hours** while the session is open, the server **auto-closes** the session (safety net for forgotten tabs). For a normal lecture, tap **Close session** when class ends.
-
-**Strongest saving:** in the Render dashboard, **Suspend** `sta2002-cat` between teaching weeks; **Resume** a few minutes before class.
+**Saving free hours:** in the Render dashboard, **Suspend** `sta2002-cat` between teaching weeks; **Resume** a few minutes before class.
 
 ### Live poll (A–D)
 
-While the session is open, the instructor can start an anonymous multiple-choice poll. Anyone connected may vote (not only seated students); live bars are visible to everyone. Students can change their answer until you **Lock voting**, then **Clear poll** for the next question. Showing CAT for polls also nudges attendance without a separate reminder.
+While connected, the instructor can start an anonymous multiple-choice poll. Anyone connected may vote (not only seated students); live bars are visible to everyone. Students can change their answer until you **Lock voting**, then **Clear poll** for the next question. Showing CAT for polls also nudges attendance without a separate reminder.
 
 ## Layout
 
@@ -86,7 +79,7 @@ Manual Web Service settings (if not using Blueprint): Root Directory `cat`, Buil
 
 Redis is written when someone **edits a name card**, and once more on graceful shutdown. Sit / move / stand stay in memory for the live class. Without Upstash, profile edits are lost on redeploy.
 
-Free-tier tip: do **not** leave the CAT tab open after class (Socket.IO keeps the instance awake). Prefer **Close session** and/or **Suspend** the service when you are not teaching.
+Free-tier tip: do **not** leave the CAT tab open after class (Socket.IO keeps the instance awake). Prefer **Suspend** the service when you are not teaching.
 
 ## Roster files
 
