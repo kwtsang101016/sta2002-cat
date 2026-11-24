@@ -9,7 +9,7 @@ import type {
   SeatRef,
   ServerSnapshot,
 } from "../../shared/types.ts";
-import { loadAuthSession } from "./authSession.ts";
+import { loadAuthSession, saveAuthSession } from "./authSession.ts";
 
 export type ConnectionStatus =
   | "idle"
@@ -144,14 +144,20 @@ export function useClassroomSync(): ClassroomSync {
         path: "/socket.io",
         transports: ["websocket", "polling"],
         reconnection: allowReconnectWhileOpen,
-        reconnectionAttempts: allowReconnectWhileOpen ? 5 : 0,
+        // Keep retrying (a laptop that slept or a Render restart can take minutes);
+        // the remembered PIN is re-sent on every successful reconnect.
+        reconnectionAttempts: allowReconnectWhileOpen ? Number.POSITIVE_INFINITY : 0,
         reconnectionDelay: 600,
-        reconnectionDelayMax: 4000,
+        reconnectionDelayMax: 5000,
       });
       socketRef.current = socket;
 
       const restoreSession = () => {
         const session = loadAuthSession();
+        if (session.instructorSecret || Object.keys(session.secrets).length > 0) {
+          // Sliding window: an active classroom stays signed in for 4 hours past the last connect.
+          saveAuthSession(session);
+        }
         if (session.instructorSecret) {
           socket.emit("authorize", {
             secret: session.instructorSecret,
@@ -266,7 +272,27 @@ export function useClassroomSync(): ClassroomSync {
 
   useEffect(() => {
     attachSocket(true);
+
+    // Browsers throttle idle tabs; nudge the socket when the tab wakes or the network returns.
+    const reconnectIfDropped = () => {
+      const socket = socketRef.current;
+      if (wantConnectedRef.current && socket && !socket.connected) {
+        socket.connect();
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        reconnectIfDropped();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", reconnectIfDropped);
+    window.addEventListener("focus", reconnectIfDropped);
+
     return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", reconnectIfDropped);
+      window.removeEventListener("focus", reconnectIfDropped);
       wantConnectedRef.current = false;
       teardownSocket("idle");
     };

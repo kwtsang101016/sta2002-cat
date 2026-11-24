@@ -118,8 +118,40 @@ async function loadState(): Promise<ClassroomState> {
   return loadClassroomState(statePath);
 }
 
+/** Trailing delay before seat moves are copied to Redis (coalesces a burst of taps). */
+const DURABLE_DEBOUNCE_MS = 3000;
+let durableTimer: ReturnType<typeof setTimeout> | null = null;
+let latestState: ClassroomState | null = null;
+
+function clearDurableTimer(): void {
+  if (durableTimer) {
+    clearTimeout(durableTimer);
+    durableTimer = null;
+  }
+}
+
+/**
+ * Always writes the local file. Writes to Redis immediately when `durable`
+ * is true; otherwise a debounced Redis write follows shortly, so a Render
+ * restart restores the layout and seats from a few seconds ago rather than
+ * from the last profile edit or shutdown.
+ */
 async function persistState(next: ClassroomState, durable = false): Promise<void> {
+  latestState = next;
   try {
+    if (durable) {
+      clearDurableTimer();
+    } else if (durableStoreEnabled() && !durableTimer) {
+      durableTimer = setTimeout(() => {
+        durableTimer = null;
+        const pending = latestState;
+        if (pending) {
+          void persistClassroomState(statePath, pending, { durable: true }).catch((error) => {
+            console.error("Failed to persist classroom state to Redis:", error);
+          });
+        }
+      }, DURABLE_DEBOUNCE_MS);
+    }
     await persistClassroomState(statePath, next, { durable });
   } catch (error) {
     console.error("Failed to persist classroom state:", error);
@@ -202,8 +234,9 @@ async function main(): Promise<void> {
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: { origin: true },
-    pingInterval: 8000,
-    pingTimeout: 15000,
+    // Tolerate throttled background tabs and brief network drops (e.g. a long idle tab).
+    pingInterval: 20000,
+    pingTimeout: 60000,
     maxHttpBufferSize: 3e5,
   });
 
@@ -520,7 +553,7 @@ async function main(): Promise<void> {
           throw new Error("Row and seat counts must be numbers.");
         }
         state = setLayout(state, studentRowCount, seatsPerRow);
-        await persistState(state, false);
+        await persistState(state, true);
         emitState();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not update the layout.";
@@ -597,7 +630,7 @@ async function main(): Promise<void> {
         requireInstructor(socket);
         requireOpenSession(socket);
         state = resetSeating(state);
-        await persistState(state, false);
+        await persistState(state, true);
         emitState();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not reset the table.";
